@@ -1,1 +1,648 @@
+import os 
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from PIL import Image
+from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.model_selection import train_test_split
+import pandas as pd
+import torch
+import torch.optim as optim
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+import torchvision.transforms as transforms
+from torchvision import models, datasets
+import torch.nn.functional as F
+
+import warnings
+warnings.filterwarnings('ignore')
+
+base_directory = '/kaggle/input/brain-tumor-mri-dataset'
+train, test = 'Training', 'Testing'
+target_size = (224, 224)
+random_state = 42
+batch_size = 32
+num_classes = 4
+device = "cuda" if torch.cuda.is_available() else "cpu"
+label_map = {
+    'notumor': 0,        
+    'glioma': 1,         
+    'meningioma': 2,     
+    'pituitary': 3       
+}
+
+categories = os.listdir(base_directory+'/'+train)
+print(categories)
+
+def display_images(dataset_type, num_images=4, image_size=(224, 224)):
+    
+    dataset_path = os.path.join(base_directory, dataset_type)
+
+    fig, axes = plt.subplots(len(categories), num_images, figsize=(15, 10))
+
+    for row, category in enumerate(categories):
+        category_path = os.path.join(dataset_path, category)
+        image_filenames = random.sample(os.listdir(category_path), num_images)  # Select random images
+        
+        for col, image_filename in enumerate(image_filenames):
+            while image_filename == '.DS_Store':
+                image_filename = random.sample(os.listdir(category_path), 1)[0]
+            image_path = os.path.join(category_path, image_filename)
+            image = Image.open(image_path).resize(image_size)
+            axes[row, col].imshow(image, cmap='gray')
+            axes[row, col].axis('off')
+            axes[row, col].set_title(f"{category}")
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_class_distribution(dataset_type):
+    path = os.path.join(base_directory, dataset_type)
+    counts = [len(os.listdir(os.path.join(path, cat))) for cat in categories]
+
+    plt.bar(categories, counts, color = ['navy', 'teal', 'darkorange', 'crimson'])
+    plt.xlabel("Class")
+    plt.ylabel("Number of Images")
+    plt.title(f"{dataset_type.capitalize()} Set Distribution")
+    plt.show()
+
+plot_class_distribution(train)
+
+display_images(train)
+
+plot_class_distribution(test)
+
+display_images(test)
+
+def count_images_per_class(base_path):
+    class_counts = {}
+    for class_name in os.listdir(base_path):
+        class_path = os.path.join(base_path, class_name)
+        if os.path.isdir(class_path):
+            image_files = [f for f in os.listdir(class_path) if os.path.isfile(os.path.join(class_path, f))]
+            class_counts[class_name] = len(image_files)
+    return class_counts
+
+train_path = '/kaggle/input/brain-tumor-mri-dataset/Training'
+test_path = '/kaggle/input/brain-tumor-mri-dataset/Testing'
+
+train_distribution = count_images_per_class(train_path)
+test_distribution = count_images_per_class(test_path)
+
+print("Training Set Distribution:")
+for class_name, count in train_distribution.items():
+    print(f"{class_name}: {count} images")
+
+print("\nTesting Set Distribution:")
+for class_name, count in test_distribution.items():
+    print(f"{class_name}: {count} images")
+
+
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+train_path = '/kaggle/input/brain-tumor-mri-dataset/Training'
+test_path = '/kaggle/input/brain-tumor-mri-dataset/Testing'
+img_size = (224, 224)
+batch_size = 32
+
+# Augmented training data generator
+train_datagen = ImageDataGenerator(
+    rescale=1./255,
+    rotation_range=30,
+    zoom_range=0.3,
+    horizontal_flip=True,
+    width_shift_range=0.1,
+    height_shift_range=0.1,
+    shear_range=0.15,
+    brightness_range=[0.8, 1.2],
+    fill_mode='nearest'
+)
+
+# Only rescaling for testing/validation
+test_datagen = ImageDataGenerator(rescale=1./255)
+
+# Load training images
+train_data = train_datagen.flow_from_directory(
+    train_path,
+    target_size=img_size,
+    batch_size=batch_size,
+    class_mode='categorical'
+)
+
+# Load testing images
+test_data = test_datagen.flow_from_directory(
+    test_path,
+    target_size=img_size,
+    batch_size=batch_size,
+    class_mode='categorical',
+    shuffle=False
+)
+
+
+from tensorflow import keras
+from tensorflow.keras import layers, regularizers
+from tensorflow.keras.metrics import Precision, Recall, AUC
+def build_improved_cnn(input_shape=(224, 224, 3), num_classes=4):
+    l2_reg = 1e-4  # L2 regularization strength
+    inputs = keras.Input(shape=input_shape)
+    
+    # Block 1
+    x = layers.Conv2D(64, (3, 3), padding='same', kernel_regularizer=regularizers.l2(l2_reg), kernel_initializer='he_normal')(inputs)
+    x = layers.BatchNormalization()(x)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.Conv2D(64, (3, 3), padding='same', kernel_regularizer=regularizers.l2(l2_reg), kernel_initializer='he_normal')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+    x = layers.Dropout(0.25)(x)
+    
+    # Block 2
+    x = layers.Conv2D(128, (3, 3), padding='same', kernel_regularizer=regularizers.l2(l2_reg), kernel_initializer='he_normal')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.Conv2D(128, (3, 3), padding='same', kernel_regularizer=regularizers.l2(l2_reg), kernel_initializer='he_normal')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+    x = layers.Dropout(0.3)(x)
+    
+    # Block 3
+    x = layers.Conv2D(256, (3, 3), padding='same', kernel_regularizer=regularizers.l2(l2_reg), kernel_initializer='he_normal')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.Conv2D(256, (3, 3), padding='same', kernel_regularizer=regularizers.l2(l2_reg), kernel_initializer='he_normal')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+    x = layers.Dropout(0.4)(x)
+
+    # Block 4 (Optional deeper layer)
+    x = layers.Conv2D(512, (3, 3), padding='same', kernel_regularizer=regularizers.l2(l2_reg), kernel_initializer='he_normal')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.GlobalAveragePooling2D()(x)
+
+    # Fully Connected Layers
+    x = layers.Dense(256, activation='relu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = layers.Dropout(0.5)(x)
+    outputs = layers.Dense(num_classes, activation='softmax')(x)
+
+    model = keras.Model(inputs, outputs)
+    return model
+
+# Build and compile the improved model
+improved_cnn = build_improved_cnn()
+improved_cnn.compile(
+    optimizer='adam',
+    loss='categorical_crossentropy',
+    metrics=['accuracy', Precision(), Recall(), AUC()]
+)
+improved_cnn.summary()
+
+import tensorflow as tf
+from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau
+from tensorflow.keras.metrics import Precision, Recall, AUC
+
+# GPU memory growth setup
+physical_devices = tf.config.list_physical_devices('GPU')
+if physical_devices:
+    try:
+        tf.config.experimental.set_memory_growth(physical_devices[0], True)
+        print("✅ GPU detected and memory growth set:", physical_devices[0].name)
+    except RuntimeError as e:
+        print("⚠️ Could not set memory growth:", e)
+else:
+    print("❌ GPU not found — training will use CPU.")
+
+# Compile model with additional metrics
+improved_cnn.compile(
+    optimizer='adam',
+    loss='categorical_crossentropy',
+    metrics=['accuracy', Precision(name='precision'), Recall(name='recall'), AUC(name='auc')]
+)
+
+# ModelCheckpoint: Save best model in .h5 format with epoch in name
+checkpoint_cb = ModelCheckpoint(
+    filepath='best_model_epoch-{epoch:02d}_valacc-{val_accuracy:.2f}_valloss-{val_loss:.2f}.keras',
+    monitor='val_loss',
+    save_best_only=True,
+    save_weights_only=False,
+    verbose=1,
+    mode='min'
+)
+
+# Learning rate reduction on plateau
+reduce_lr_cb = ReduceLROnPlateau(
+    monitor='val_loss',
+    factor=0.5,
+    patience=3,
+    min_lr=1e-6,
+    verbose=1
+)
+
+# Train the model
+cnn_history = improved_cnn.fit(
+    train_data,
+    validation_data=test_data,
+    epochs=60,
+    callbacks=[checkpoint_cb, reduce_lr_cb],
+    verbose=1
+)
+
+
+improved_cnn.save('final_cnn_model1.h5')
+print("✅ Model saved as final_cnn_model.h5")
+
+from sklearn.metrics import classification_report, confusion_matrix
+import numpy as np
+
+# Get predictions
+y_pred_probs = improved_cnn.predict(test_data)
+y_pred = np.argmax(y_pred_probs, axis=1)
+y_true = test_data.classes
+
+# Get class labels
+class_labels = list(test_data.class_indices.keys())
+
+# Generate classification report
+report = classification_report(y_true, y_pred, target_names=class_labels)
+print("📊 Classification Report:\n", report)
+
+
+loss, accuracy, precision, recall, auc = improved_cnn.evaluate(test_data, verbose=0)
+print(f"🔍 Final Test Loss: {loss:.4f}")
+print(f"✅ Final Test Accuracy: {accuracy:.4f}")
+print(f"🎯 Precision: {precision:.4f}, Recall: {recall:.4f}, AUC: {auc:.4f}")
+
+
+loss, accuracy, precision, recall, auc = improved_cnn.evaluate(test_data, verbose=0)
+
+print(f"🔍 Final Validation Loss: {loss:.4f}")
+print(f"✅ Final Validation Accuracy: {accuracy:.4f}")
+print(f"🎯 Validation Precision: {precision:.4f}")
+print(f"🔁 Validation Recall: {recall:.4f}")
+print(f"📈 Validation AUC: {auc:.4f}")
+
+
+import matplotlib.pyplot as plt
+
+# Plot accuracy
+plt.figure(figsize=(12, 5))
+
+plt.subplot(1, 2, 1)
+plt.plot(cnn_history.history['accuracy'], label='Train Accuracy')
+plt.plot(cnn_history.history['val_accuracy'], label='Validation Accuracy')
+plt.title('Accuracy over Epochs')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.grid(True)
+
+# Plot loss
+plt.subplot(1, 2, 2)
+plt.plot(cnn_history.history['loss'], label='Train Loss')
+plt.plot(cnn_history.history['val_loss'], label='Validation Loss')
+plt.title('Loss over Epochs')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+
+from tensorflow import keras
+from tensorflow.keras import layers
+
+def build_unet_classifier(input_shape=(224, 224, 3), num_classes=4):
+    inputs = keras.Input(shape=input_shape)
+
+    # Encoder
+    c1 = layers.Conv2D(64, 3, padding='same')(inputs)
+    c1 = layers.BatchNormalization()(c1)
+    c1 = layers.LeakyReLU()(c1)
+    c1 = layers.Conv2D(64, 3, padding='same')(c1)
+    c1 = layers.BatchNormalization()(c1)
+    c1 = layers.LeakyReLU()(c1)
+    p1 = layers.MaxPooling2D()(c1)
+    p1 = layers.Dropout(0.2)(p1)
+
+    c2 = layers.Conv2D(128, 3, padding='same')(p1)
+    c2 = layers.BatchNormalization()(c2)
+    c2 = layers.LeakyReLU()(c2)
+    c2 = layers.Conv2D(128, 3, padding='same')(c2)
+    c2 = layers.BatchNormalization()(c2)
+    c2 = layers.LeakyReLU()(c2)
+    p2 = layers.MaxPooling2D()(c2)
+    p2 = layers.Dropout(0.3)(p2)
+
+    # Bottleneck
+    b = layers.Conv2D(256, 3, padding='same')(p2)
+    b = layers.BatchNormalization()(b)
+    b = layers.LeakyReLU()(b)
+    b = layers.Conv2D(256, 3, padding='same')(b)
+    b = layers.BatchNormalization()(b)
+    b = layers.LeakyReLU()(b)
+
+    # Decoder
+    u1 = layers.Conv2DTranspose(128, 3, strides=2, padding='same')(b)
+    u1 = layers.BatchNormalization()(u1)
+    u1 = layers.LeakyReLU()(u1)
+    u1 = layers.Concatenate()([u1, c2])
+    u1 = layers.Conv2D(128, 3, padding='same')(u1)
+    u1 = layers.BatchNormalization()(u1)
+    u1 = layers.LeakyReLU()(u1)
+    u1 = layers.Conv2D(128, 3, padding='same')(u1)
+    u1 = layers.BatchNormalization()(u1)
+    u1 = layers.LeakyReLU()(u1)
+
+    u2 = layers.Conv2DTranspose(64, 3, strides=2, padding='same')(u1)
+    u2 = layers.BatchNormalization()(u2)
+    u2 = layers.LeakyReLU()(u2)
+    u2 = layers.Concatenate()([u2, c1])
+    u2 = layers.Conv2D(64, 3, padding='same')(u2)
+    u2 = layers.BatchNormalization()(u2)
+    u2 = layers.LeakyReLU()(u2)
+    u2 = layers.Conv2D(64, 3, padding='same')(u2)
+    u2 = layers.BatchNormalization()(u2)
+    u2 = layers.LeakyReLU()(u2)
+
+    # Classification Head
+    x = layers.GlobalAveragePooling2D()(u2)
+    x = layers.Dense(256, activation='relu')(x)
+    x = layers.Dropout(0.5)(x)
+    x = layers.Dense(128, activation='relu')(x)
+    x = layers.Dropout(0.3)(x)
+    outputs = layers.Dense(num_classes, activation='softmax')(x)
+
+    model = keras.Model(inputs, outputs)
+    return model
+unet_model = build_unet_classifier()
+unet_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+unet_model.summary()
+
+
+import tensorflow as tf
+from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau
+from tensorflow.keras.metrics import Precision, Recall, AUC
+
+# GPU memory growth setup
+physical_devices = tf.config.list_physical_devices('GPU')
+if physical_devices:
+    try:
+        tf.config.experimental.set_memory_growth(physical_devices[0], True)
+        print("✅ GPU detected and memory growth set:", physical_devices[0].name)
+    except RuntimeError as e:
+        print("⚠️ Could not set memory growth:", e)
+else:
+    print("❌ GPU not found — training will use CPU.")
+
+# Compile the U-Net classifier model
+unet_model.compile(
+    optimizer='adam',
+    loss='categorical_crossentropy',
+    metrics=['accuracy', Precision(name='precision'), Recall(name='recall'), AUC(name='auc')]
+)
+
+# ModelCheckpoint: Save best model in .h5 format with epoch in filename
+checkpoint_cb = ModelCheckpoint(
+    filepath='best_unet_model_epoch-{epoch:02d}_valacc-{val_accuracy:.2f}_valloss-{val_loss:.2f}.keras',
+    monitor='val_loss',
+    save_best_only=True,
+    save_weights_only=False,
+    verbose=1,
+    mode='min'
+)
+
+# Learning rate scheduler
+reduce_lr_cb = ReduceLROnPlateau(
+    monitor='val_loss',
+    factor=0.5,
+    patience=3,
+    min_lr=1e-6,
+    verbose=1
+)
+
+# Train the model
+unet_history = unet_model.fit(
+    train_data,
+    validation_data=test_data,
+    epochs=60,
+    callbacks=[checkpoint_cb, reduce_lr_cb],
+    verbose=1
+)
+
+
+unet_model.save('final_unet_model.h5')
+print("✅ Model saved as final_unet_model.h5")
+
+loss, accuracy, precision, recall, auc = unet_model.evaluate(test_data, verbose=0)
+
+print(f"🔍 Final Validation Loss: {loss:.4f}")
+print(f"✅ Final Validation Accuracy: {accuracy:.4f}")
+print(f"🎯 Validation Precision: {precision:.4f}")
+print(f"🔁 Validation Recall: {recall:.4f}")
+print(f"📈 Validation AUC: {auc:.4f}")
+
+import matplotlib.pyplot as plt
+
+# Plot accuracy
+plt.figure(figsize=(12, 5))
+
+plt.subplot(1, 2, 1)
+plt.plot(unet_history.history['accuracy'], label='Train Accuracy')
+plt.plot(unet_history.history['val_accuracy'], label='Validation Accuracy')
+plt.title('Accuracy over Epochs')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.grid(True)
+
+# Plot loss
+plt.subplot(1, 2, 2)
+plt.plot(unet_history.history['loss'], label='Train Loss')
+plt.plot(unet_history.history['val_loss'], label='Validation Loss')
+plt.title('Loss over Epochs')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+
+from tensorflow import keras
+from tensorflow.keras import layers
+
+def attention_block(x, g, inter_channels):
+    theta_x = layers.Conv2D(inter_channels, 1, padding='same')(x)
+    phi_g = layers.Conv2D(inter_channels, 1, padding='same')(g)
+
+    if theta_x.shape[1] != phi_g.shape[1] or theta_x.shape[2] != phi_g.shape[2]:
+        phi_g = layers.UpSampling2D(size=(theta_x.shape[1] // phi_g.shape[1],
+                                          theta_x.shape[2] // phi_g.shape[2]))(phi_g)
+
+    f = layers.Activation('relu')(layers.add([theta_x, phi_g]))
+    psi = layers.Conv2D(1, 1, activation='sigmoid', padding='same')(f)
+    return layers.multiply([x, psi])
+
+def conv_block(x, filters):
+    x = layers.Conv2D(filters, 3, padding='same', kernel_initializer='he_normal')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.LeakyReLU()(x)
+    x = layers.Conv2D(filters, 3, padding='same', kernel_initializer='he_normal')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.LeakyReLU()(x)
+    return x
+
+def build_attention_unet(input_shape=(224, 224, 3), num_classes=4):
+    inputs = keras.Input(shape=input_shape)
+
+    # Encoder
+    c1 = conv_block(inputs, 64)
+    p1 = layers.MaxPooling2D()(c1)
+
+    c2 = conv_block(p1, 128)
+    p2 = layers.MaxPooling2D()(c2)
+
+    # Bottleneck
+    b = conv_block(p2, 256)
+
+    # Decoder with Attention
+    g1 = layers.Conv2DTranspose(128, 3, strides=2, padding='same')(b)
+    g1 = layers.BatchNormalization()(g1)
+    g1 = layers.LeakyReLU()(g1)
+    a1 = attention_block(c2, g1, 128)
+    merge1 = layers.Concatenate()([g1, a1])
+    d1 = conv_block(merge1, 128)
+    d1 = layers.Dropout(0.3)(d1)
+
+    g2 = layers.Conv2DTranspose(64, 3, strides=2, padding='same')(d1)
+    g2 = layers.BatchNormalization()(g2)
+    g2 = layers.LeakyReLU()(g2)
+    a2 = attention_block(c1, g2, 64)
+    merge2 = layers.Concatenate()([g2, a2])
+    d2 = conv_block(merge2, 64)
+    d2 = layers.Dropout(0.3)(d2)
+
+    # Classification head
+    x = layers.GlobalAveragePooling2D()(d2)
+    x = layers.Dense(128, activation='relu')(x)
+    x = layers.Dropout(0.5)(x)
+    outputs = layers.Dense(num_classes, activation='softmax')(x)
+
+    model = keras.Model(inputs, outputs)
+    return model
+
+# Instantiate and compile the optimized model
+att_unet_model = build_attention_unet()
+att_unet_model.compile(
+    optimizer='adam',
+    loss='categorical_crossentropy',
+    metrics=['accuracy', keras.metrics.Precision(name='precision'),
+             keras.metrics.Recall(name='recall'), keras.metrics.AUC(name='auc')]
+)
+att_unet_model.summary()
+
+
+import tensorflow as tf
+from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau
+from tensorflow.keras.metrics import Precision, Recall, AUC
+
+# Enable GPU memory growth
+physical_devices = tf.config.list_physical_devices('GPU')
+if physical_devices:
+    try:
+        tf.config.experimental.set_memory_growth(physical_devices[0], True)
+        print("✅ GPU detected and memory growth set:", physical_devices[0].name)
+    except RuntimeError as e:
+        print("⚠️ Could not set memory growth:", e)
+else:
+    print("❌ GPU not found — training will use CPU.")
+
+# Compile Attention U-Net
+att_unet_model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
+    loss='categorical_crossentropy',
+    metrics=[
+        'accuracy',
+        Precision(name='precision'),
+        Recall(name='recall'),
+        AUC(name='auc')
+    ]
+)
+
+# ModelCheckpoint with epoch, val_accuracy, val_loss in filename (.h5 format)
+checkpoint_cb = ModelCheckpoint(
+    filepath='best_attention_unet_epoch-{epoch:02d}_valacc-{val_accuracy:.2f}_valloss-{val_loss:.2f}.keras',
+    monitor='val_loss',
+    mode='min',
+    save_best_only=True,
+    save_weights_only=False,
+    verbose=1
+)
+
+# Reduce LR on plateau
+reduce_lr_cb = ReduceLROnPlateau(
+    monitor='val_loss',
+    factor=0.5,
+    patience=3,
+    min_lr=1e-6,
+    verbose=1
+)
+
+# Train model
+att_unet_history = att_unet_model.fit(
+    train_data,
+    validation_data=test_data,
+    epochs=60,
+    callbacks=[checkpoint_cb, reduce_lr_cb],
+    verbose=1
+)
+
+
+att_unet_model.save('final_unet_model.h5')
+print("✅ Model saved as final_unet_model.h5")
+
+loss, accuracy, precision, recall, auc = att_unet_model.evaluate(test_data, verbose=0)
+
+print(f"🔍 Final Validation Loss: {loss:.4f}")
+print(f"✅ Final Validation Accuracy: {accuracy:.4f}")
+print(f"🎯 Validation Precision: {precision:.4f}")
+print(f"🔁 Validation Recall: {recall:.4f}")
+print(f"📈 Validation AUC: {auc:.4f}")
+
+
+import matplotlib.pyplot as plt
+
+# Plot accuracy
+plt.figure(figsize=(12, 5))
+
+plt.subplot(1, 2, 1)
+plt.plot(att_unet_history.history['accuracy'], label='Train Accuracy')
+plt.plot(att_unet_history.history['val_accuracy'], label='Validation Accuracy')
+plt.title('Accuracy over Epochs')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.grid(True)
+
+# Plot loss
+plt.subplot(1, 2, 2)
+plt.plot(att_unet_history.history['loss'], label='Train Loss')
+plt.plot(att_unet_history.history['val_loss'], label='Validation Loss')
+plt.title('Loss over Epochs')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+
+
 
