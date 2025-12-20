@@ -18,6 +18,17 @@ print("Predicted Class:", classes[predicted_class])
 
 Predicted Class: Glioma
 
+### Dataset Distribution
+
+| Class Name     | Number of Images |
+|---------------|------------------|
+| Glioma        | 926              |
+| Meningioma    | 937              |
+| Pituitary     | 901              |
+| No Tumor      | 500              |
+| **Total**     | **3264**         |
+
+
 
 ## Model Performance Comparison
 
@@ -27,3 +38,65 @@ Predicted Class: Glioma
 | U-Net           | 0.87      | 0.85   | 0.95     | 96.80%   |
 | Attention U-Net | 0.89      | 0.87   | 0.96     | 98.70%   |
 | ResNet50        | 0.64      | 0.63   | 0.63     | 73.41%   |
+
+
+### Model Architecture Overview
+
+| Model           | Type           | Purpose        | Special Feature              |
+|-----------------|---------------|----------------|------------------------------|
+| CNN             | Classification| Tumor type     | Baseline deep CNN            |
+| U-Net           | Segmentation  | Tumor region   | Encoder–Decoder              |
+| Attention U-Net | Segmentation  | Tumor region   | Attention Gates              |
+| ResNet50        | Classification| Tumor type     | Transfer Learning            |
+
+
+
+### Training Configuration
+
+| Parameter        | Value              |
+|------------------|--------------------|
+| Optimizer        | Adam               |
+| Learning Rate    | 0.001              |
+| Batch Size       | 32                 |
+| Epochs           | 25                 |
+| Image Size       | 224 × 224          |
+| Loss Function    | Categorical / BCE  |
+
+
+
+### Classification Performance
+
+| Model     | Accuracy (%) | Precision | Recall | F1-Score |
+|----------|--------------|-----------|--------|----------|
+| CNN      | 96.75        | 0.92      | 0.91   | 0.92     |
+| ResNet50| 73.41        | 0.64      | 0.63   | 0.63     |
+
+
+
+### Segmentation Performance
+
+| Model           | Dice Coefficient | IoU Score |
+|-----------------|------------------|-----------|
+| U-Net           | 0.85             | 0.78      |
+| Attention U-Net | 0.89             | 0.83      |
+
+
+### Overall Accuracy Comparison
+
+| Model           | Accuracy (%) |
+|-----------------|--------------|
+| CNN             | 96.75        |
+| U-Net           | 96.80        |
+| Attention U-Net | 98.70        |
+| ResNet50        | 73.41        |
+
+
+
+### Final Conclusion
+
+| Aspect                  | Best Model        |
+|-------------------------|-------------------|
+| Classification Accuracy | CNN               |
+| Segmentation Accuracy   | Attention U-Net   |
+| Overall Performance     | Attention U-Net   |
+
