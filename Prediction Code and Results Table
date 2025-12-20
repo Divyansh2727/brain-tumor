@@ -1,0 +1,29 @@
+import tensorflow as tf
+import numpy as np
+import cv2
+
+model = tf.keras.models.load_model("models/cnn_model.h5")
+
+img = cv2.imread("sample_image.jpg")
+img = cv2.resize(img, (224,224))
+img = img / 255.0
+img = np.expand_dims(img, axis=0)
+
+prediction = model.predict(img)
+predicted_class = np.argmax(prediction)
+
+classes = ["Glioma", "Meningioma", "No Tumor", "Pituitary"]
+print("Predicted Class:", classes[predicted_class])
+
+
+Predicted Class: Glioma
+
+
+## Model Performance Comparison
+
+| Model           | Precision | Recall | F1-Score | Accuracy |
+|-----------------|-----------|--------|----------|----------|
+| CNN             | 0.92      | 0.91   | 0.92     | 96.75%   |
+| U-Net           | 0.87      | 0.85   | 0.95     | 96.80%   |
+| Attention U-Net | 0.89      | 0.87   | 0.96     | 98.70%   |
+| ResNet50        | 0.64      | 0.63   | 0.63     | 73.41%   |
