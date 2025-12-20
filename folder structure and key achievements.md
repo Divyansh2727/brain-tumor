@@ -30,3 +30,12 @@ Brain-Tumor-Classification/
 ├── README.md
 ├── requirements.txt
 └── LICENSE
+
+
+
+## 🚀 Key Achievements
+- ✅ Achieved **98.7% accuracy** using Attention U-Net.
+- ✅ Segmentation masks with high **Dice Coefficient** for tumor detection.
+- ✅ CNN achieved **96.75% classification accuracy** across 4 classes.
+- ✅ Comparative analysis of **CNN, U-Net, Attention U-Net, ResNet50**.
+- ✅ Interactive **inference script** to test new MRI scans.
