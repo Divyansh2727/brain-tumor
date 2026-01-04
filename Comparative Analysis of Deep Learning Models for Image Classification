@@ -1,0 +1,485 @@
+import zipfile
+
+zip_file_path = 'archive.zip'
+
+extract_dir = 'btds/'
+
+with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+    zip_ref.extractall(extract_dir)
+
+print(f"Files extracted to {extract_dir}")
+
+import os
+
+dataset_path = '/content/btds/'
+
+dataset_files = os.listdir(dataset_path)
+
+for file in dataset_files:
+    print(file)
+
+import os
+
+dataset_path = '/content/btds/Training/'
+
+dataset_files = os.listdir(dataset_path)
+
+for file in dataset_files:
+    print(file)
+
+import os
+
+def count_images_per_class(base_path):
+    class_counts = {}
+    for class_name in os.listdir(base_path):
+        class_path = os.path.join(base_path, class_name)
+        if os.path.isdir(class_path):
+            image_files = [f for f in os.listdir(class_path) if os.path.isfile(os.path.join(class_path, f))]
+            class_counts[class_name] = len(image_files)
+    return class_counts
+
+train_path = '/content/btds/Training/'
+test_path = '/content/btds/Testing/'
+
+train_distribution = count_images_per_class(train_path)
+test_distribution = count_images_per_class(test_path)
+
+print("Training Set Distribution:")
+for class_name, count in train_distribution.items():
+    print(f"{class_name}: {count} images")
+
+print("\nTesting Set Distribution:")
+for class_name, count in test_distribution.items():
+    print(f"{class_name}: {count} images")
+
+
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from glob import glob
+
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers, models
+from sklearn.metrics import classification_report, confusion_matrix
+
+
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+train_path = "/content/btds/Training"
+test_path = "/content/btds/Testing"
+img_size = (224, 224)
+batch_size = 32
+
+train_datagen = ImageDataGenerator(rescale=1./255,
+                                   rotation_range=20,
+                                   zoom_range=0.2,
+                                   horizontal_flip=True)
+
+test_datagen = ImageDataGenerator(rescale=1./255)
+
+train_data = train_datagen.flow_from_directory(train_path,
+                                               target_size=img_size,
+                                               batch_size=batch_size,
+                                               class_mode='categorical')
+
+test_data = test_datagen.flow_from_directory(test_path,
+                                             target_size=img_size,
+                                             batch_size=batch_size,
+                                             class_mode='categorical',
+                                             shuffle=False)
+
+
+def build_cnn_model(input_shape=(224, 224, 3), num_classes=4):
+    inputs = keras.Input(shape=input_shape)
+    x = layers.Conv2D(64, (3, 3), activation='relu', padding='same')(inputs)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    x = layers.Conv2D(128, (3, 3), activation='relu', padding='same')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    x = layers.Conv2D(256, (3, 3), activation='relu', padding='same')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    x = layers.Conv2D(512, (3, 3), activation='relu', padding='same')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.GlobalAveragePooling2D()(x)
+
+    x = layers.Dense(256, activation='relu')(x)
+    x = layers.Dropout(0.5)(x)
+    outputs = layers.Dense(num_classes, activation='softmax')(x)
+
+    model = keras.Model(inputs, outputs)
+    return model
+
+cnn_model = build_cnn_model()
+cnn_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+cnn_model.summary()
+
+
+def build_unet_classifier(input_shape=(224, 224, 3), num_classes=4):
+    inputs = keras.Input(shape=input_shape)
+
+    c1 = layers.Conv2D(64, 3, padding='same', activation='relu')(inputs)
+    c1 = layers.BatchNormalization()(c1)
+    c1 = layers.Conv2D(64, 3, padding='same', activation='relu')(c1)
+    c1 = layers.BatchNormalization()(c1)
+    p1 = layers.MaxPooling2D()(c1)
+
+    c2 = layers.Conv2D(128, 3, padding='same', activation='relu')(p1)
+    c2 = layers.BatchNormalization()(c2)
+    c2 = layers.Conv2D(128, 3, padding='same', activation='relu')(c2)
+    c2 = layers.BatchNormalization()(c2)
+    p2 = layers.MaxPooling2D()(c2)
+
+    b = layers.Conv2D(256, 3, padding='same', activation='relu')(p2)
+    b = layers.BatchNormalization()(b)
+    b = layers.Conv2D(256, 3, padding='same', activation='relu')(b)
+    b = layers.BatchNormalization()(b)
+
+    u1 = layers.Conv2DTranspose(128, 3, strides=2, padding='same', activation='relu')(b)
+    u1 = layers.BatchNormalization()(u1)
+    u1 = layers.Concatenate()([u1, c2])
+    u1 = layers.Conv2D(128, 3, padding='same', activation='relu')(u1)
+    u1 = layers.BatchNormalization()(u1)
+
+    u2 = layers.Conv2DTranspose(64, 3, strides=2, padding='same', activation='relu')(u1)
+    u2 = layers.BatchNormalization()(u2)
+    u2 = layers.Concatenate()([u2, c1])
+    u2 = layers.Conv2D(64, 3, padding='same', activation='relu')(u2)
+    u2 = layers.BatchNormalization()(u2)
+
+    x = layers.GlobalAveragePooling2D()(u2)
+    x = layers.Dense(128, activation='relu')(x)
+    x = layers.Dropout(0.5)(x)
+    outputs = layers.Dense(num_classes, activation='softmax')(x)
+
+    model = keras.Model(inputs, outputs)
+    return model
+
+unet_model = build_unet_classifier()
+unet_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+unet_model.summary()
+
+
+from tensorflow.keras.callbacks import ModelCheckpoint
+
+checkpoint_cb = ModelCheckpoint("best_unet_model.h5", save_best_only=True, monitor='val_loss')
+
+unet_history = unet_model.fit(train_data,
+                              validation_data=test_data,
+                              epochs=20,
+                              callbacks=[checkpoint_cb])
+
+
+def attention_block(x, g, inter_channels):
+    theta_x = layers.Conv2D(inter_channels, 1, padding='same')(x)
+    phi_g = layers.Conv2D(inter_channels, 1, padding='same')(g)
+
+    if theta_x.shape[1] != phi_g.shape[1] or theta_x.shape[2] != phi_g.shape[2]:
+        phi_g = layers.UpSampling2D(size=(theta_x.shape[1] // phi_g.shape[1],
+                                          theta_x.shape[2] // phi_g.shape[2]))(phi_g)
+
+    f = layers.Activation('relu')(layers.add([theta_x, phi_g]))
+    psi = layers.Conv2D(1, 1, activation='sigmoid', padding='same')(f)
+    return layers.multiply([x, psi])
+
+def build_attention_unet(input_shape=(224, 224, 3), num_classes=4):
+    inputs = keras.Input(shape=input_shape)
+
+    c1 = layers.Conv2D(64, 3, padding='same', activation='relu')(inputs)
+    c1 = layers.BatchNormalization()(c1)
+    c1 = layers.Conv2D(64, 3, padding='same', activation='relu')(c1)
+    c1 = layers.BatchNormalization()(c1)
+    p1 = layers.MaxPooling2D()(c1)
+
+    c2 = layers.Conv2D(128, 3, padding='same', activation='relu')(p1)
+    c2 = layers.BatchNormalization()(c2)
+    c2 = layers.Conv2D(128, 3, padding='same', activation='relu')(c2)
+    c2 = layers.BatchNormalization()(c2)
+    p2 = layers.MaxPooling2D()(c2)
+
+    b = layers.Conv2D(256, 3, padding='same', activation='relu')(p2)
+    b = layers.BatchNormalization()(b)
+    b = layers.Conv2D(256, 3, padding='same', activation='relu')(b)
+    b = layers.BatchNormalization()(b)
+
+    g1 = layers.Conv2DTranspose(128, 3, strides=2, padding='same', activation='relu')(b)
+    g1 = layers.BatchNormalization()(g1)
+    a1 = attention_block(c2, g1, 128)
+    merge1 = layers.Concatenate()([g1, a1])
+    d1 = layers.Conv2D(128, 3, padding='same', activation='relu')(merge1)
+    d1 = layers.BatchNormalization()(d1)
+
+    g2 = layers.Conv2DTranspose(64, 3, strides=2, padding='same', activation='relu')(d1)
+    g2 = layers.BatchNormalization()(g2)
+    a2 = attention_block(c1, g2, 64)
+    merge2 = layers.Concatenate()([g2, a2])
+    d2 = layers.Conv2D(64, 3, padding='same', activation='relu')(merge2)
+    d2 = layers.BatchNormalization()(d2)
+
+    x = layers.GlobalAveragePooling2D()(d2)
+    x = layers.Dense(128, activation='relu')(x)
+    x = layers.Dropout(0.5)(x)
+    outputs = layers.Dense(num_classes, activation='softmax')(x)
+
+    model = keras.Model(inputs, outputs)
+    return model
+
+att_unet_model = build_attention_unet()
+att_unet_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+att_unet_model.summary()
+
+
+from tensorflow.keras.callbacks import ModelCheckpoint
+
+checkpoint_cb = ModelCheckpoint("best_attention_unet_model.h5", save_best_only=True, monitor='val_loss')
+
+att_unet_history = att_unet_model.fit(train_data,
+                                      validation_data=test_data,
+                                      epochs=20,
+                                      callbacks=[checkpoint_cb])
+
+
+from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.applications.resnet50 import preprocess_input
+
+def build_resnet_model(input_shape=(224, 224, 3), num_classes=4):
+    base_model = ResNet50(weights='imagenet', include_top=False, input_shape=input_shape)
+
+    for layer in base_model.layers[-30:]:
+        layer.trainable = True
+
+    inputs = keras.Input(shape=input_shape)
+    x = preprocess_input(inputs)
+    x = base_model(x, training=True)
+
+    x = layers.GlobalAveragePooling2D()(x)
+    x = layers.Dense(512, activation='relu')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.5)(x)
+
+    x = layers.Dense(128, activation='relu')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.3)(x)
+
+    outputs = layers.Dense(num_classes, activation='softmax')(x)
+
+    model = keras.Model(inputs, outputs)
+    return model
+
+resnet_model = build_resnet_model()
+resnet_model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4),
+                     loss='categorical_crossentropy',
+                     metrics=['accuracy'])
+
+resnet_model.summary()
+
+
+from tensorflow.keras.callbacks import ModelCheckpoint
+
+checkpoint_cb = ModelCheckpoint("best_resnet_model.h5", save_best_only=True, monitor='val_loss')
+
+resnet_history = resnet_model.fit(train_data,
+                                  validation_data=test_data,
+                                  epochs=15,
+                                  callbacks=[checkpoint_cb])
+cnn_model.save("cnn_model.h5")
+unet_model.save("unet_model.h5")
+att_unet_model.save("attention_unet_model.h5")
+#resnet_model.save("resnet_model.h5")
+
+from tensorflow.keras.models import load_model
+
+cnn_best_model = load_model("best_cnn_model.h5")
+unet_best_model = load_model("best_unet_model.h5")
+att_unet_best_model = load_model("best_attention_unet_model.h5")
+#resnet_best_model = load_model("best_resnet_model.h5")
+
+cnn_eval = cnn_best_model.evaluate(test_data)
+unet_eval = unet_best_model.evaluate(test_data)
+att_unet_eval = att_unet_best_model.evaluate(test_data)
+#resnet_eval = resnet_best_model.evaluate(test_data)
+
+print("CNN Evaluation (Loss, Accuracy):", cnn_eval)
+print("U-Net Evaluation (Loss, Accuracy):", unet_eval)
+print("Attention U-Net Evaluation (Loss, Accuracy):", att_unet_eval)
+#print("ResNet50 Evaluation (Loss, Accuracy):", resnet_eval)
+
+
+def plot_history(history, label):
+    plt.plot(history.history['accuracy'], label=f'{label} Train Acc')
+    plt.plot(history.history['val_accuracy'], label=f'{label} Val Acc')
+
+plt.figure(figsize=(10,6))
+plot_history(cnn_history, "CNN")
+plot_history(unet_history, "U-Net")
+plot_history(att_unet_history, "Att-U-Net")
+#plot_history(resnet_history, "ResNet50")
+plt.title("Model Accuracy Comparison")
+plt.xlabel("Epochs")
+plt.ylabel("Accuracy")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+
+
+def evaluate_model(model, name):
+    preds = model.predict(test_data)
+    y_pred = np.argmax(preds, axis=1)
+    y_true = test_data.classes
+    print(f"\n{name} Classification Report:")
+    print(classification_report(y_true, y_pred, target_names=test_data.class_indices.keys()))
+
+    cm = confusion_matrix(y_true, y_pred)
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=test_data.class_indices,
+                yticklabels=test_data.class_indices)
+    plt.title(f"{name} Confusion Matrix")
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.show()
+
+evaluate_model(cnn_model, "CNN")
+evaluate_model(unet_model, "U-Net")
+evaluate_model(att_unet_model, "Attention U-Net")
+#evaluate_model(resnet_model, "ResNet50")
+
+
+from sklearn.metrics import classification_report, confusion_matrix
+import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np
+
+cnn_best_model = load_model("best_cnn_model.h5")
+unet_best_model = load_model("best_unet_model.h5")
+att_unet_best_model = load_model("best_attention_unet_model.h5")
+#resnet_best_model = load_model("best_resnet_model.h5")
+
+def evaluate_model(model, name):
+    preds = model.predict(test_data)
+    y_pred = np.argmax(preds, axis=1)
+    y_true = test_data.classes
+    print(f"\n{name} Classification Report:")
+    print(classification_report(y_true, y_pred, target_names=test_data.class_indices.keys()))
+
+    cm = confusion_matrix(y_true, y_pred)
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=test_data.class_indices,
+                yticklabels=test_data.class_indices)
+    plt.title(f"{name} Confusion Matrix")
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.show()
+
+evaluate_model(cnn_best_model, "CNN")
+evaluate_model(unet_best_model, "U-Net")
+evaluate_model(att_unet_best_model, "Attention U-Net")
+#evaluate_model(resnet_best_model, "ResNet50")
+
+
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+
+class_labels = list(test_data.class_indices.keys())
+
+def load_sample_image_from_generator(generator):
+    batch_index = random.randint(0, len(generator) - 1)
+    x_batch, y_batch = generator[batch_index]
+
+    rand_idx = random.randint(0, x_batch.shape[0] - 1)
+    img = x_batch[rand_idx]
+    label = np.argmax(y_batch[rand_idx])
+    return img, label
+
+def visualize_predictions(models, model_names, test_data, num_samples=3):
+    for _ in range(num_samples):
+        img, true_label = load_sample_image_from_generator(test_data)
+        img_expanded = np.expand_dims(img, axis=0)
+
+        plt.figure(figsize=(6, 6))
+        plt.imshow(img)
+        plt.axis('off')
+        plt.title(f"True Label: {class_labels[true_label]}", fontsize=14)
+
+        for i, model in enumerate(models):
+            pred = model.predict(img_expanded, verbose=0)
+            pred_class_idx = np.argmax(pred)
+            pred_class = class_labels[pred_class_idx]
+            confidence = float(np.max(pred)) * 100
+
+            plt.text(
+                10, 20 + i * 20,
+                f"{model_names[i]} → {pred_class} ({confidence:.2f}%)",
+                color='white',
+                fontsize=12,
+                bbox=dict(facecolor='black', alpha=0.5, pad=2)
+            )
+
+        plt.show()
+
+models_to_test = [cnn_best_model, unet_best_model, att_unet_best_model]
+model_names = ["CNN", "U-Net", "Att-U-Net"]
+
+visualize_predictions(models_to_test, model_names, test_data, num_samples=3)
+
+
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+
+class_labels = list(test_data.class_indices.keys())
+
+index_to_class = {v: k for k, v in test_data.class_indices.items()}
+
+def load_image_by_class(generator, target_class_idx):
+    for batch_idx in range(len(generator)):
+        x_batch, y_batch = generator[batch_idx]
+        for i in range(len(x_batch)):
+            label = np.argmax(y_batch[i])
+            if label == target_class_idx:
+                return x_batch[i], label
+    return None, None
+
+def visualize_predictions(models, model_names, test_data, samples_per_class=2):
+    for class_idx in range(len(class_labels)):
+        for _ in range(samples_per_class):
+            img, true_label = load_image_by_class(test_data, class_idx)
+            if img is None:
+                continue
+
+            img_expanded = np.expand_dims(img, axis=0)
+
+            plt.figure(figsize=(6, 6))
+            plt.imshow(img)
+            plt.axis('off')
+            plt.title(f"True Label: {class_labels[true_label]}", fontsize=14)
+
+            for i, model in enumerate(models):
+                pred = model.predict(img_expanded, verbose=0)
+                pred_class_idx = np.argmax(pred)
+                pred_class = class_labels[pred_class_idx]
+                confidence = float(np.max(pred)) * 100
+
+                plt.text(
+                    10, 20 + i * 20,
+                    f"{model_names[i]} → {pred_class} ({confidence:.2f}%)",
+                    color='white',
+                    fontsize=12,
+                    bbox=dict(facecolor='black', alpha=0.5, pad=2)
+                )
+
+            plt.show()
+
+models_to_test = [cnn_best_model, unet_best_model, att_unet_best_model]
+model_names = ["CNN", "U-Net", "Att-U-Net"]
+
+visualize_predictions(models_to_test, model_names, test_data, samples_per_class=2)
+
+
